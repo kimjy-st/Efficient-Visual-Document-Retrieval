@@ -59,11 +59,11 @@ def train_epoch(
     t0 = time.time()
 
     # student normalize
-    Psb = l2_normalize(Pbar_param)     # (N, Ls, D)
+    Psb = l2_normalize(Pbar_param * pmask_student.unsqueeze(-1))     # (N, Ls, D)
 
     # teacher score (전체 Q x 전체 P)
     with torch.no_grad():
-        sc_t = score_multi_vector_masked(Q_all_norm, P_teacher_norm, qmask, pmask_teacher)
+        sc_t = score_multi_vector_masked(Q_all_norm, P_teacher_norm, qmask, pmask_teacher, 64)
 
     # student score (전체 Q x 전체 P)
     sc_s = score_multi_vector_masked(Q_all_norm, Psb, qmask, pmask_student)
@@ -71,8 +71,20 @@ def train_epoch(
 
     opt.zero_grad(set_to_none=True)
     loss.backward()
-    opt.step()
+    with torch.no_grad():
+        g = Pbar_param.grad                      # (N,L,D)
+        g_abs = g.abs().amax(dim=-1)             # (N,L)
+        m2 = pmask_student                       # (N,L) bool
 
+        g_valid_max   = g_abs[m2].max().item() if g_abs[m2].numel() else 0.0
+        g_invalid_max = g_abs[~m2].max().item() if g_abs[~m2].numel() else 0.0
+        print(f"[grad] valid max={g_valid_max:.3e} | invalid max={g_invalid_max:.3e}")
+    opt.step()
+    with torch.no_grad():
+        p_abs = Pbar_param.detach().abs().amax(dim=-1)  # (N,L)
+        m2 = pmask_student
+        p_invalid_max = p_abs[~m2].max().item() if p_abs[~m2].numel() else 0.0
+        print(f"[param] invalid abs max after step={p_invalid_max:.3e}")
     dt = time.time() - t0
 
     # logging
@@ -92,33 +104,45 @@ def train_epoch(
 
 @torch.no_grad()
 def eval_retrieval_from_tensors(
-    test_payload: Dict[str, Any],
-    P_norm: torch.Tensor,            # (N, Lp, D) normalized
-    pmask: torch.Tensor,             # (N, Lp)
-    device: torch.device,
-    eval_batch_size: int,
+    Q_norm: torch.Tensor,            # (Nq, Lq, D) normalized
+    qmask: torch.Tensor,             # (Nq, Lq) bool
+    P_norm: torch.Tensor,            # (Np, Lp, D) normalized
+    pmask: torch.Tensor,             # (Np, Lp) bool
+    relevant_docs: Dict[str, Dict[str, int]],
+    docidx_2_docid: Dict[str, str],
+    qsidx_2_query,                   # list/np.ndarray or None
 ) -> Dict[str, Any]:
     evaluator = CustomRetrievalEvaluator()
 
-    Q_obj = test_payload["query"]
-    q_attn = test_payload["query_attnmask"]
-    relevant_docs = test_payload["relevant_docs"]
-    docidx_2_docid = test_payload["docidx_2_docid"]
-    qsidx_2_query = test_payload["qsidx_2_query"]
-
-    Q_norm, qmask = preprocess_queries(Q_obj, q_attn, device=device)
-    with torch.no_grad():
-        scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask)  # (Nq, Np)
+    scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask)  # (Nq, Np)
 
     results = {}
     for qi in range(scores.shape[0]):
         qkey = str(qsidx_2_query[qi]) if qsidx_2_query is not None else str(qi)
-        results[qkey] = {docidx_2_docid[str(di)]: float(scores[qi, di].item()) for di in range(scores.shape[1])}
+        results[qkey] = {docidx_2_docid[str(di)]: float(scores[qi, di].item())
+                         for di in range(scores.shape[1])}
 
     metrics = evaluator.compute_mteb_metrics(relevant_docs, results)
     return metrics
 
+@torch.no_grad()
+def eval_spl_loss(
+    P_teacher_norm: torch.Tensor,   # (N, Lt, D) masked+norm
+    pmask_teacher: torch.Tensor,    # (N, Lt)
+    Q_norm: torch.Tensor,           # (Q, Lq, D)
+    qmask: torch.Tensor,            # (Q, Lq)
+    Pbar_param: nn.Parameter,       # (N, Ls, D) raw
+    pmask_student: torch.Tensor,    # (N, Ls)
+    chunk_p: int = 64,
+) -> float:
+    # student masked+norm
+    Psb = l2_normalize(Pbar_param * pmask_student.unsqueeze(-1))
 
+    sc_t = score_multi_vector_masked(Q_norm, P_teacher_norm, qmask, pmask_teacher, chunk_p)
+    sc_s = score_multi_vector_masked(Q_norm, Psb,           qmask, pmask_student, chunk_p)
+
+    loss = 0.5 * (sc_t - sc_s).pow(2).mean()
+    return float(loss.item())
 
 
 def tokens_to_object(P_pad_np: np.ndarray, pmask_np: np.ndarray) -> np.ndarray:
@@ -154,20 +178,29 @@ def main():
         train_payload = load_train_payload(train_npz)
         test_payload = load_test_payload(test_npz)
 
-        # ---------- TEACHER (train split) ----------
+        # ---------- TEACHER (train / test split) ----------
         docid_tr = train_payload["docid"]
         P_teacher_obj = train_payload["documents"]
         doc_attn_tr = train_payload["doc_attnmask"]
         doc_img_tr = train_payload["doc_imgmask"]
 
         Q_train_obj = train_payload["query"]
-        q_attn_tr = train_payload["query_attnmask"]
+        q_attn_tr = train_payload["query_attnmask"] 
+        Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device=device)
+
+        Q_test_obj = test_payload["query"]
+        q_attn_test = test_payload["query_attnmask"]
+        Q_test_norm, qmask_test = preprocess_queries(Q_test_obj, q_attn_test, device=device)
+
+        relevant_docs_test = test_payload["relevant_docs"]
+        docidx_2_docid_test = test_payload["docidx_2_docid"]
+        qsidx_2_query_test = test_payload["qsidx_2_query"]
 
         # preprocess teacher docs / train queries 
-        _, P_teacher_norm, pmask_teacher, _valid_teacher = preprocess_docs(
-            P_teacher_obj, doc_attn_tr, device=device
+        P_teacher_raw, pmask_teacher, _valid_teacher = preprocess_docs(
+            P_teacher_obj, doc_attn_tr, doc_img_tr, device=device
         )
-        Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device=device)
+        P_teacher_norm = l2_normalize(P_teacher_raw * pmask_teacher.unsqueeze(-1))
 
         N = P_teacher_norm.shape[0]
 
@@ -196,13 +229,13 @@ def main():
                 )
                 if ok:
                     print(f"[align] {dataset} mf{mf}: init matched by docid")
-            Pbar_raw, _Pbar_norm0, pmask_student, _valid_student = preprocess_docs(
-                Pbar_obj, doc_attn_in, device=device
+            Pbar_raw, pmask_student, _valid_student = preprocess_docs(
+                Pbar_obj, doc_attn_in,doc_img_in,device=device
             )
             if Pbar_raw.shape[0] != N:
                 raise ValueError(f"init doc count mismatch: got {Pbar_raw.shape[0]} vs teacher {N}")
 
-            Pbar_param = nn.Parameter(Pbar_raw)  # raw param
+            Pbar_param = nn.Parameter(Pbar_raw*pmask_student.unsqueeze(-1))  # 유효한 문서 토큰만 반영하기 위해 masking
             opt = set_optimizer(args.opt, Pbar_param, args.lr, args.weight_decay)
 
             out_dir = Path(args.out_root) / args.name / f"mf{mf}" / dataset
@@ -216,8 +249,58 @@ def main():
                     encoding="utf-8",
                 )
 
-            print(f"\n[run] out_dir={out_dir}")
 
+            # =========================
+            # eval @ step=0 (init Pbar)
+            # =========================
+            with torch.no_grad():
+                Pbar_init_norm = l2_normalize(Pbar_param.detach() * pmask_student.unsqueeze(-1))
+
+            metrics0 = eval_retrieval_from_tensors(
+                Q_norm=Q_test_norm,
+                qmask=qmask_test,
+                P_norm=Pbar_init_norm,
+                pmask=pmask_student,
+                relevant_docs=relevant_docs_test,
+                docidx_2_docid=docidx_2_docid_test,
+                qsidx_2_query=qsidx_2_query_test,
+            )
+
+            eval_loss0 = eval_spl_loss(
+                P_teacher_norm=P_teacher_norm,
+                pmask_teacher=pmask_teacher,
+                Q_norm=Q_test_norm,
+                qmask=qmask_test,
+                Pbar_param=Pbar_param,
+                pmask_student=pmask_student,
+                chunk_p=64,
+            )
+
+            step0 = 0
+            if tb is not None:
+                tb.add_scalar("eval/Recall@1", float(metrics0["Recall"]["Recall@1"]), step0)
+                tb.add_scalar("eval/NDCG@5", float(metrics0["NDCG"]["NDCG@5"]), step0)
+                tb.add_scalar("eval/loss", float(eval_loss0), step0)
+
+            log0 = {
+                "dataset": dataset,
+                "mf": mf,
+                "epoch": 0,
+                "eval/loss": float(eval_loss0),
+                "eval/Recall@1": float(metrics0["Recall"]["Recall@1"]),
+                "eval/NDCG@5": float(metrics0["NDCG"]["NDCG@5"]),
+                "note": "init Pbar before training",
+            }
+            logger.info(json.dumps(log0, ensure_ascii=False))
+
+            r1_0 = float(metrics0["Recall"]["Recall@1"]) * 100.0
+            nd5_0 = float(metrics0["NDCG"]["NDCG@5"]) * 100.0
+            print("[evaluator metrics @ init]")
+            print(f"Recall@1 = {r1_0:.2f}")
+            print(f"nDCG@5    = {nd5_0:.2f}")
+            print(f"SPL loss  = {eval_loss0:.6f}")
+
+            
             for epoch in range(1, args.epochs + 1):
                 # ---------------- train ----------------
                 # NOTE: train_epoch가 아래 키들을 같이 반환하도록 수정되어 있어야 함:
@@ -237,18 +320,31 @@ def main():
                 )
 
                 # ---------------- eval ----------------
-                Pbar_now_norm = l2_normalize(Pbar_param.detach())
+                Pbar_now_norm = l2_normalize(Pbar_param.detach() * pmask_student.unsqueeze(-1))
                 metrics = eval_retrieval_from_tensors(
-                    test_payload=test_payload,
+                    Q_norm=Q_test_norm,
+                    qmask=qmask_test,
                     P_norm=Pbar_now_norm,
                     pmask=pmask_student,
-                    device=device,
-                    eval_batch_size=1,
+                    relevant_docs=relevant_docs_test,
+                    docidx_2_docid=docidx_2_docid_test,
+                    qsidx_2_query=qsidx_2_query_test,
+                )
+
+                eval_loss = eval_spl_loss(
+                    P_teacher_norm=P_teacher_norm,
+                    pmask_teacher=pmask_teacher,
+                    Q_norm=Q_test_norm,
+                    qmask=qmask_test,
+                    Pbar_param=Pbar_param,
+                    pmask_student=pmask_student,
+                    chunk_p=64,
                 )
                 step = epoch
                 if tb is not None:
                     tb.add_scalar("eval/Recall@1", float(metrics["Recall"]["Recall@1"]), step)
                     tb.add_scalar("eval/NDCG@5", float(metrics["NDCG"]["NDCG@5"]), step)
+                    tb.add_scalar("eval/loss", float(eval_loss), step)
 
                 r1 = float(metrics["Recall"]["Recall@1"]) * 100.0
                 nd5 = float(metrics["NDCG"]["NDCG@5"]) * 100.0
@@ -265,6 +361,7 @@ def main():
                     "train/last_loss": float(stats.get("last_loss", 0.0)),
                     "train/step": int(stats.get("global_step", 0)),
                     "train/time_sec": float(stats.get("time_sec", 0.0)),
+                    "eval/loss": float(eval_loss),
                     "eval/Recall@1": float(metrics["Recall"]["Recall@1"]),
                     "eval/NDCG@5": float(metrics["NDCG"]["NDCG@5"]),
                 }
