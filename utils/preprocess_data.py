@@ -80,25 +80,29 @@ def pad_mask_object(mask_list: Optional[np.ndarray], L: int, N: int, valid: np.n
 def preprocess_docs(
     documents_obj: np.ndarray,
     doc_attnmask_obj: Optional[np.ndarray],
+    doc_imgmask_obj: Optional[np.ndarray],
     device: torch.device,
-) -> Tuple[torch.Tensor, torch.Tensor, np.ndarray, np.ndarray]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, np.ndarray]:
     """
     Returns:
-      P_raw:  (N, L, D) torch.float32 (NOT normalized)  -> for nn.Parameter init
+      P_raw:  (N, L, D) torch.float32 (NOT normalized)
       P_norm: (N, L, D) torch.float32 (L2 normalized)
       pmask:  (N, L)    torch.bool = valid & attn & img
-      valid:  (N, L)    np.bool_   (for debugging if needed)
+      valid:  (N, L)    np.bool_   (debug)
     """
+    # zero pad 
     P_pad, valid = pad_tokens_object(documents_obj)  # (N,L,D), (N,L)
     N, L, _ = P_pad.shape
 
-    am = pad_mask_object(doc_attnmask_obj, L=L, N=N, valid=valid)
-    pmask_np = valid & am
+    # attn mask (없으면 all-True로)
+    am = pad_mask_object(doc_attnmask_obj, L=L, N=N, valid=valid)  # (N,L) np.bool_
+    # img mask (없으면 all-True로)
+    im = pad_mask_object(doc_imgmask_obj, L=L, N=N, valid=valid)   # (N,L) np.bool_
+    pmask_np = valid & am & im
 
     P_raw = torch.from_numpy(P_pad).to(device=device, dtype=torch.float32)
-    P_norm = l2_normalize(P_raw)
-    pmask = torch.from_numpy(pmask_np).to(device=device)
-    return P_raw, P_norm, pmask, valid
+    pmask = torch.from_numpy(pmask_np).to(device=device, dtype=torch.bool)
+    return P_raw, pmask, valid
 
 
 def preprocess_queries(
