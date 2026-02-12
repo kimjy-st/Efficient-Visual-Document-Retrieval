@@ -141,6 +141,15 @@ def load_train_payload(train_npz: str):
     }
 
 def load_test_payload(test_npz: str):
+    """
+    load_train_payload랑 역할은 동일함 그냥 구분해둔듯 ...... 
+    걍 하나로 합칠게요 
+    Inputs
+        test_npz : 테스트 npz 경로 
+    
+    Return 
+        docid, documents, doc_attnmask 등이 담긴 Dict
+    """
     z = load_npz(test_npz)
     return {
         "docid": z["docid"],
@@ -161,4 +170,37 @@ def load_init_payload(init_npz: str):
         "documents": z["documents"],
         "doc_attnmask": z["doc_attnmask"] if "doc_attnmask" in z.files else None,
         "doc_imgmask": z["doc_imgmask"] if "doc_imgmask" in z.files else None,
+    }
+
+def load_query_payload(npz_path: str):
+    z = load_npz(npz_path)
+    return {
+        "query": z["query"],
+        "query_attnmask": z["query_attnmask"] if "query_attnmask" in z.files else None,
+        "qsidx_2_query": z["qsidx_2_query"] if "qsidx_2_query" in z.files else None,
+        "relevant_docs": z["relevant_docs"].item() if "relevant_docs" in z.files else None,
+    }
+
+def load_payload(npz_path: str):
+    """
+    load_train_payload, load_test_payload와 동일한 역할 
+    docid, documents, doc_attnmask, doc_imgmask, query, query_attnmask, relevant_docs,
+    docidx_2_docid, qsidx_2_query 키를 로드한 뒤 Dict형태로 정리하여 반환함 
+    
+    Input 
+        npz_path: npz 경로 
+    Return
+        Dicts
+    """
+    z = load_npz(npz_path)
+    return {
+        "docid": z["docid"],
+        "documents": z["documents"],
+        "doc_attnmask": z["doc_attnmask"],
+        "doc_imgmask": z["doc_imgmask"],
+        "query": z["query"],
+        "query_attnmask": z["query_attnmask"],
+        "relevant_docs": z["relevant_docs"].item(),
+        "docidx_2_docid": z["docidx_2_docid"].item(),
+        "qsidx_2_query": z["qsidx_2_query"],
     }
