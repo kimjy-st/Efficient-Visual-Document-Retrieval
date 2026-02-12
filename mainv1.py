@@ -300,7 +300,7 @@ def main():
             print(f"nDCG@5    = {nd5_0:.2f}")
             print(f"SPL loss  = {eval_loss0:.6f}")
 
-            
+
             for epoch in range(1, args.epochs + 1):
                 # ---------------- train ----------------
                 # NOTE: train_epoch가 아래 키들을 같이 반환하도록 수정되어 있어야 함:
