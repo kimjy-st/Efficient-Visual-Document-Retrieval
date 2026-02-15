@@ -21,18 +21,18 @@ def build_argparser():
     p = argparse.ArgumentParser()
     p.add_argument("--datasets", type=str, nargs="+", required=True)
     p.add_argument("--query_root", type=str, default="ProxyQ/results0212/colqwen")
-    p.add_argument("--teacher_root", type=str, default="/home/hyshin/Project/EVDR/SIGIR/features2/colqwen")
-    p.add_argument("--init_root", type=str, default="/home/hyshin/Project/EVDR/SIGIR/features2/colqwen/compressed2")
+    p.add_argument("--teacher_root", type=str, default="/home/hyshin/Project/EVDR/data/vidore_test/0213_features/all")
+    p.add_argument("--init_root", type=str, default="/home/hyshin/Project/EVDR/data/vidore_test/0213_features/S3E_init/colqwen")
     p.add_argument("--mfs", type=int, nargs="+", required=True)
 
     p.add_argument("--out_root", type=str, default="results")
     p.add_argument("--name", type=str, default="spl_train")
 
-    p.add_argument("--epochs", type=int, default=15)
+    p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--q_batch", type=int, default=32)
     p.add_argument("--opt", type=str, default="adamw")
     p.add_argument("--lr", type=float, default=1e-3)
-    p.add_argument("--weight_decay", type=float, default=0.0)
+    p.add_argument("--weight_decay", type=float, default=1e-2)
     p.add_argument("--print_every", type=int, default=10)
     p.add_argument("--save_period", type=int, default = 3)
 
@@ -311,6 +311,21 @@ def main():
             }
             logger.info(json.dumps(log0, ensure_ascii=False))
 
+            best_r1 = {
+                "epoch": 0,
+                "NDCG@5": float(metrics0["NDCG"]["NDCG@5"]),
+                "Recall@1": float(metrics0["Recall"]["Recall@1"]),
+            }
+            best_nd5 = {
+                "epoch": 0,
+                "NDCG@5": float(metrics0["NDCG"]["NDCG@5"]),
+                "Recall@1": float(metrics0["Recall"]["Recall@1"]),
+            }
+
+            logger.info(f"best recall epoch| 0 | nDCG@5={float(best_r1['NDCG@5']):.5f} | Recall@1={float(best_r1['Recall@1']):.5f}")
+            logger.info(f"best nDCG@5 epoch| 0 | nDCG@5={best_nd5['NDCG@5']:.5f} | Recall@1={best_nd5['Recall@1']:.5f}")
+
+
             r1_0 = float(metrics0["Recall"]["Recall@1"]) * 100.0
             nd5_0 = float(metrics0["NDCG"]["NDCG@5"]) * 100.0
             print("[evaluator metrics @ init]")
@@ -383,6 +398,31 @@ def main():
                     "eval/NDCG@5": float(metrics["NDCG"]["NDCG@5"]),
                 }
                 logger.info(json.dumps(log_obj, ensure_ascii=False))
+                # ---------------- best update ----------------
+                cur_r1 = float(metrics["Recall"]["Recall@1"])
+                cur_nd5 = float(metrics["NDCG"]["NDCG@5"])
+
+                updated_r1 = False
+                updated_nd5 = False
+
+                # best Recall@1 갱신 (tie-break: NDCG@5)
+                if (cur_r1 > best_r1["Recall@1"]) or (cur_r1 == best_r1["Recall@1"] and cur_nd5 > best_r1["NDCG@5"]):
+                    best_r1 = {"epoch": int(epoch), "NDCG@5": cur_nd5, "Recall@1": cur_r1}
+                    updated_r1 = True
+
+                # best NDCG@5 갱신 (tie-break: Recall@1)
+                if (cur_nd5 > best_nd5["NDCG@5"]) or (cur_nd5 == best_nd5["NDCG@5"] and cur_r1 > best_nd5["Recall@1"]):
+                    best_nd5 = {"epoch": int(epoch), "NDCG@5": cur_nd5, "Recall@1": cur_r1}
+                    updated_nd5 = True
+
+                if updated_r1:
+                    logger.info(
+                        f"best recall epoch| {best_r1['epoch']} | nDCG@5={best_r1['NDCG@5']:.5f} | Recall@1={best_r1['Recall@1']:.5f}"
+                    )
+                if updated_nd5:
+                    logger.info(
+                        f"best nDCG@5 epoch| {best_nd5['epoch']} | nDCG@5={best_nd5['NDCG@5']:.5f} | Recall@1={best_nd5['Recall@1']:.5f}"
+                    )
 
                 # ---------------- save ----------------
                 Pbar_now_np = Pbar_now_norm.detach().cpu().numpy().astype(np.float32)
@@ -410,7 +450,11 @@ def main():
                             "loss": "0.5*(SPL(mask=valid&attn&img))^2",
                         },
                     )
-
+            logger.info(json.dumps({
+                    "summary/best_recall": best_r1,
+                    "summary/best_ndcg5": best_nd5,
+                    "note": "training finished",
+                }, ensure_ascii=False))
             print(f"[done] {dataset} mf{mf} -> {out_dir}")
             if tb is not None:
                 tb.flush()
