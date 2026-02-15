@@ -195,12 +195,12 @@ def load_payload(npz_path: str):
     z = load_npz(npz_path)
     return {
         "docid": z["docid"],
-        "documents": z["documents"],
-        "doc_attnmask": z["doc_attnmask"],
-        "doc_imgmask": z["doc_imgmask"],
-        "query": z["query"],
-        "query_attnmask": z["query_attnmask"],
-        "relevant_docs": z["relevant_docs"].item(),
-        "docidx_2_docid": z["docidx_2_docid"].item(),
-        "qsidx_2_query": z["qsidx_2_query"],
+        "documents": z["documents"] if "documents" in z.files else None,
+        "doc_attnmask": z["doc_attnmask"] if "doc_attnmask" in z.files else None,
+        "doc_imgmask": z["doc_imgmask"] if "doc_imgmask" in z.files else None,
+        "query": z["query"] if "query" in z.files else None,
+        "query_attnmask": z["query_attnmask"] if "query_attnmask" in z.files else None,
+        "relevant_docs": z["relevant_docs"].item() if "relevant_docs" in z.files else None,
+        "docidx_2_docid": z["docidx_2_docid"].item() if "docidx_2_docid" in z.files else None,
+        "qsidx_2_query": z["qsidx_2_query"] if "qsidx_2_query" in z.files else None
     }
