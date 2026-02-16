@@ -424,24 +424,49 @@ def main():
                         f"best nDCG@5 epoch| {best_nd5['epoch']} | nDCG@5={best_nd5['NDCG@5']:.5f} | Recall@1={best_nd5['Recall@1']:.5f}"
                     )
 
-                # ---------------- save ----------------
-                Pbar_now_np = Pbar_now_norm.detach().cpu().numpy().astype(np.float32)
-                pmask_np = pmask_student.detach().cpu().numpy().astype(bool)
-                docs_obj = tokens_to_object(Pbar_now_np, pmask_np)
+                # ---------------- save (only when best updates) ----------------
+                if updated_r1 or updated_nd5:
+                    Pbar_now_np = Pbar_now_norm.detach().cpu().numpy().astype(np.float32)
+                    pmask_np = pmask_student.detach().cpu().numpy().astype(bool)
+                    docs_obj = tokens_to_object(Pbar_now_np, pmask_np)
 
-                out_npz = out_dir / f"compressed_ep{epoch}.npz"
-                if epoch % args.save_period == 0:
+                if updated_r1:
+                    out_npz = out_dir / "best_recall.npz"
                     save_compressed_npz(
                         save_path=out_npz,
                         docid=_as_object_array(docid_tr),
                         documents_obj=docs_obj,
-                        doc_attnmask_obj=doc_attn_in,  # 원본(학생) 마스크 그대로
+                        doc_attnmask_obj=doc_attn_in,
                         doc_imgmask_obj=doc_img_in,
                         meta={
                             "dataset": dataset,
                             "mf": mf,
-                            "epoch": epoch,
-                            "avg_loss": stats,
+                            "epoch": int(epoch),
+                            "best_type": "Recall@1",
+                            "best": best_r1,
+                            "eval": {
+                                "Recall@1": float(metrics["Recall"]["Recall@1"]),
+                                "NDCG@5": float(metrics["NDCG"]["NDCG@5"]),
+                            },
+                            "lr": args.lr,
+                            "loss": "pairwise_loss",
+                        },
+                    )
+
+                if updated_nd5:
+                    out_npz = out_dir / "best_ndcg5.npz"
+                    save_compressed_npz(
+                        save_path=out_npz,
+                        docid=_as_object_array(docid_tr),
+                        documents_obj=docs_obj,
+                        doc_attnmask_obj=doc_attn_in,
+                        doc_imgmask_obj=doc_img_in,
+                        meta={
+                            "dataset": dataset,
+                            "mf": mf,
+                            "epoch": int(epoch),
+                            "best_type": "NDCG@5",
+                            "best": best_nd5,
                             "eval": {
                                 "Recall@1": float(metrics["Recall"]["Recall@1"]),
                                 "NDCG@5": float(metrics["NDCG"]["NDCG@5"]),
