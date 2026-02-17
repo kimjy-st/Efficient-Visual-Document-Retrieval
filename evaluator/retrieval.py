@@ -36,6 +36,7 @@ def left_padding(sequences, batch_first=True, padding_value=0):
     padded = []
 
     for seq in sequences:
+        seq = seq.to(device='cuda')
         pad_len = max_len - seq.size(0)
         pad = torch.full((pad_len,d), padding_value, device = 'cuda',dtype=seq.dtype)
         padded_seq = torch.cat([pad, seq], dim=0)
