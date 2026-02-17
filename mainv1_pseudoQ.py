@@ -329,8 +329,8 @@ def main():
             r1_0 = float(metrics0["Recall"]["Recall@1"]) * 100.0
             nd5_0 = float(metrics0["NDCG"]["NDCG@5"]) * 100.0
             print("[evaluator metrics @ init]")
-            print(f"Recall@1 = {r1_0:.2f}")
-            print(f"nDCG@5    = {nd5_0:.2f}")
+            print(f"Recall@1 = {r1_0:.5f}")
+            print(f"nDCG@5    = {nd5_0:.5f}")
             print(f"SPL loss  = {eval_loss0:.6f}")
 
 
@@ -381,8 +381,8 @@ def main():
                 r1 = float(metrics["Recall"]["Recall@1"]) * 100.0
                 nd5 = float(metrics["NDCG"]["NDCG@5"]) * 100.0
                 print("[evaluator metrics]")
-                print(f"Recall@1 = {r1:.2f}")
-                print(f"nDCG@5    = {nd5:.2f}")
+                print(f"Recall@1 = {r1:.5f}")
+                print(f"nDCG@5    = {nd5:.5f}")
 
                 # ---------------- log (main-level, 안전하게) ----------------
                 log_obj = {
