@@ -14,7 +14,7 @@ from utils.mapping import DATASETMAP
 from evaluator.retrieval import score_multi_vector_masked, CustomRetrievalEvaluator
 from Qdatasets.query_tensor_dataset import QueryTensorDataset
 from torch.utils.data import DataLoader
-from criterion import pairwise_loss
+from criterion import pairwise_distillation_loss
 # =============================================================================
 # args
 # =============================================================================
@@ -35,7 +35,6 @@ def build_argparser():
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight_decay", type=float, default=1e-2)
     p.add_argument("--print_every", type=int, default=10)
-    p.add_argument("--save_period", type=int, default = 3)
 
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--seed", type=int, default=42)
@@ -80,7 +79,7 @@ def train_epoch(
 
         # student score
         sc_s = score_multi_vector_masked(Qb, Psb, qmb, pmask_student)
-        loss = pairwise_loss(sc_t, sc_s)
+        loss = pairwise_distillation_loss(sc_s, sc_t)
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -133,7 +132,7 @@ def eval_retrieval_from_tensors(
     return metrics
 
 @torch.no_grad()
-def eval_spl_loss(
+def eval(
     P_teacher_norm: torch.Tensor,   # (N, Lt, D) masked+norm
     pmask_teacher: torch.Tensor,    # (N, Lt)
     Q_norm: torch.Tensor,           # (Q, Lq, D)
@@ -146,9 +145,20 @@ def eval_spl_loss(
     Psb = l2_normalize(Pbar_param * pmask_student.unsqueeze(-1))
 
     sc_t = score_multi_vector_masked(Q_norm, P_teacher_norm, qmask, pmask_teacher, chunk_p)
-    sc_s = score_multi_vector_masked(Q_norm, Psb,           qmask, pmask_student, chunk_p)
-
-    loss = 0.5 * (sc_t - sc_s).pow(2).mean()
+    sc_s = score_multi_vector_masked(Q_norm, Psb, qmask, pmask_student, chunk_p)
+    Q = sc_s.shape[0]
+    if Q > 600: # tatdqa에서 oom방지 
+        total = 0.0
+        denom = 0
+        for st in range(0, Q, 300):
+            ed = min(st + 300, Q)
+            loss_c = pairwise_distillation_loss(sc_s[st:ed], sc_t[st:ed])
+            w = (ed - st) 
+            total += loss_c * w
+            denom += w
+        loss = total / max(denom, 1)
+    else:
+        loss = pairwise_distillation_loss(sc_s, sc_t)
     return float(loss.item())
 
 
@@ -284,14 +294,14 @@ def main():
                 qsidx_2_query=qsidx_2_query_test,
             )
 
-            eval_loss0 = eval_spl_loss(
+            eval_loss0 = eval(
                 P_teacher_norm=P_teacher_norm,
                 pmask_teacher=pmask_teacher,
                 Q_norm=Q_test_norm,
                 qmask=qmask_test,
                 Pbar_param=Pbar_param,
                 pmask_student=pmask_student,
-                chunk_p=64,
+                chunk_p=32,
             )
 
             step0 = 0
@@ -331,7 +341,7 @@ def main():
             print("[evaluator metrics @ init]")
             print(f"Recall@1 = {r1_0:.5f}")
             print(f"nDCG@5    = {nd5_0:.5f}")
-            print(f"SPL loss  = {eval_loss0:.6f}")
+            print(f"eval loss  = {eval_loss0:.6f}")
 
 
             for epoch in range(1, args.epochs + 1):
@@ -363,7 +373,7 @@ def main():
                     qsidx_2_query=qsidx_2_query_test,
                 )
 
-                eval_loss = eval_spl_loss(
+                eval_loss = eval(
                     P_teacher_norm=P_teacher_norm,
                     pmask_teacher=pmask_teacher,
                     Q_norm=Q_test_norm,
@@ -449,7 +459,7 @@ def main():
                                 "NDCG@5": float(metrics["NDCG"]["NDCG@5"]),
                             },
                             "lr": args.lr,
-                            "loss": "pairwise_loss",
+                            "loss": "pairwise_distillation_loss",
                         },
                     )
 
@@ -472,7 +482,7 @@ def main():
                                 "NDCG@5": float(metrics["NDCG"]["NDCG@5"]),
                             },
                             "lr": args.lr,
-                            "loss": "pairwise_loss",
+                            "loss": "pairwise_distillation_loss",
                         },
                     )
             logger.info(json.dumps({
