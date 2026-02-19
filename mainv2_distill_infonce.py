@@ -148,7 +148,7 @@ def eval(
     qmask: torch.Tensor,            # (Q, Lq)
     Pbar_param: nn.Parameter,       # (N, Ls, D) raw
     pmask_student: torch.Tensor,    # (N, Ls)
-    chunk_p: int = 32,
+    chunk_p: int = 64,
     temp : float = 0.1 
 ) -> float:
     # student masked+norm
@@ -258,12 +258,11 @@ def main():
                 if ok:
                     print(f"[align] {dataset} mf{mf}: init matched by docid")
             Pbar_raw, pmask_student, _valid_student = preprocess_docs(
-                Pbar_obj, doc_attn_in,doc_img_in,device='cpu'
+                Pbar_obj, doc_attn_in,doc_img_in,device=device
             )
             if Pbar_raw.shape[0] != N:
                 raise ValueError(f"init doc count mismatch: got {Pbar_raw.shape[0]} vs teacher {N}")
-            Pbar_param = nn.Parameter((Pbar_raw*pmask_student.unsqueeze(-1)).to(args.device))  # 유효한 문서 토큰만 반영하기 위해 masking
-            pmask_student = pmask_student.to(device, non_blocking=True)
+            Pbar_param = nn.Parameter(Pbar_raw*pmask_student.unsqueeze(-1))  # 유효한 문서 토큰만 반영하기 위해 masking
             opt = set_optimizer(args.opt, Pbar_param, args.lr, args.weight_decay)
 
             out_dir = Path(args.out_root) / args.name / f"mf{mf}" / dataset
