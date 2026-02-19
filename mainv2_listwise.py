@@ -122,7 +122,7 @@ def eval_retrieval_from_tensors(
 ) -> Dict[str, Any]:
     evaluator = CustomRetrievalEvaluator()
 
-    scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask)  # (Nq, Np)
+    scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask, chunk_p=64)  # (Nq, Np)
 
     results = {}
     for qi in range(scores.shape[0]):
@@ -197,7 +197,7 @@ def main():
         # Train query embeddings
         Q_train_obj = train_query_payload["query"]
         q_attn_tr = train_query_payload["query_attnmask"] 
-        Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device=device)
+        Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device='cpu')
 
         train_ds = QueryTensorDataset(Q_train_norm, qmask)
         train_dl = DataLoader(
@@ -205,8 +205,8 @@ def main():
             batch_size=args.q_batch,
             shuffle=True,
             drop_last=False,
-            num_workers=0,        # 텐서 이미 메모리에 있으니 보통 0이 제일 깔끔
-            pin_memory=False,
+            num_workers=0,
+            pin_memory=True,
         )
         # Test query embeddings
         Q_test_obj = teacher_payload["query"]
