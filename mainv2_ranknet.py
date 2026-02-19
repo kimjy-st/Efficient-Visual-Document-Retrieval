@@ -120,7 +120,7 @@ def eval_retrieval_from_tensors(
 ) -> Dict[str, Any]:
     evaluator = CustomRetrievalEvaluator()
 
-    scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask)  # (Nq, Np)
+    scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask, chunk_p=64)  # (Nq, Np)
 
     results = {}
     for qi in range(scores.shape[0]):
@@ -204,7 +204,7 @@ def main():
         # Train query embeddings
         Q_train_obj = train_query_payload["query"]
         q_attn_tr = train_query_payload["query_attnmask"] 
-        Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device=device)
+        Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device='cpu')
 
         train_ds = QueryTensorDataset(Q_train_norm, qmask)
         train_dl = DataLoader(
@@ -212,8 +212,8 @@ def main():
             batch_size=args.q_batch,
             shuffle=True,
             drop_last=False,
-            num_workers=0,        # 텐서 이미 메모리에 있으니 보통 0이 제일 깔끔
-            pin_memory=False,
+            num_workers=0,
+            pin_memory=True,
         )
         # Test query embeddings
         Q_test_obj = teacher_payload["query"]
@@ -258,12 +258,12 @@ def main():
                 if ok:
                     print(f"[align] {dataset} mf{mf}: init matched by docid")
             Pbar_raw, pmask_student, _valid_student = preprocess_docs(
-                Pbar_obj, doc_attn_in,doc_img_in,device=device
+                Pbar_obj, doc_attn_in,doc_img_in,device='cpu'
             )
             if Pbar_raw.shape[0] != N:
                 raise ValueError(f"init doc count mismatch: got {Pbar_raw.shape[0]} vs teacher {N}")
-
-            Pbar_param = nn.Parameter(Pbar_raw*pmask_student.unsqueeze(-1))  # 유효한 문서 토큰만 반영하기 위해 masking
+            Pbar_param = nn.Parameter((Pbar_raw*pmask_student.unsqueeze(-1)).to(args.device))  # 유효한 문서 토큰만 반영하기 위해 masking
+            pmask_student = pmask_student.to(device, non_blocking=True)
             opt = set_optimizer(args.opt, Pbar_param, args.lr, args.weight_decay)
 
             out_dir = Path(args.out_root) / args.name / f"mf{mf}" / dataset
@@ -283,7 +283,6 @@ def main():
             # =========================
             with torch.no_grad():
                 Pbar_init_norm = l2_normalize(Pbar_param.detach() * pmask_student.unsqueeze(-1))
-
             metrics0 = eval_retrieval_from_tensors(
                 Q_norm=Q_test_norm,
                 qmask=qmask_test,
@@ -293,7 +292,6 @@ def main():
                 docidx_2_docid=docidx_2_docid_test,
                 qsidx_2_query=qsidx_2_query_test,
             )
-
             eval_loss0 = eval(
                 P_teacher_norm=P_teacher_norm,
                 pmask_teacher=pmask_teacher,
@@ -301,9 +299,8 @@ def main():
                 qmask=qmask_test,
                 Pbar_param=Pbar_param,
                 pmask_student=pmask_student,
-                chunk_p=32,
+                chunk_p=64,
             )
-
             step0 = 0
             if tb is not None:
                 tb.add_scalar("eval/Recall@1", float(metrics0["Recall"]["Recall@1"]), step0)
