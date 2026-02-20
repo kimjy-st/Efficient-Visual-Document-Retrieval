@@ -199,7 +199,7 @@ def main():
         doc_img_tr = teacher_payload["doc_imgmask"]
         # Train query embeddings
         Q_train_obj = train_query_payload["query"]
-        q_attn_tr = train_query_payload["query_attnmask"] 
+        q_attn_tr = train_query_payload["query_attnmask"]
         Q_train_norm, qmask = preprocess_queries(Q_train_obj, q_attn_tr, device='cpu')
 
         train_ds = QueryTensorDataset(Q_train_norm, qmask)
@@ -221,9 +221,8 @@ def main():
         qsidx_2_query_test = teacher_payload["qsidx_2_query"]
 
         # preprocess teacher docs / train queries 
-        P_teacher_raw, pmask_teacher, _valid_teacher = preprocess_docs(
-            P_teacher_obj, doc_attn_tr, doc_img_tr, device=device
-        )
+        P_teacher_raw, pmask_teacher, _ = preprocess_docs(
+            P_teacher_obj, doc_attn_tr, doc_img_tr, device=device)
         P_teacher_norm = l2_normalize(P_teacher_raw * pmask_teacher.unsqueeze(-1)).detach()
 
         N = P_teacher_norm.shape[0]
@@ -253,13 +252,12 @@ def main():
                 )
                 if ok:
                     print(f"[align] {dataset} mf{mf}: init matched by docid")
-            Pbar_raw, pmask_student, _valid_student = preprocess_docs(
-                Pbar_obj, doc_attn_in,doc_img_in,device=device
-            )
+            Pbar_raw, pmask_student, _ = preprocess_docs(
+                Pbar_obj, doc_attn_in, doc_img_in, device=device)
             if Pbar_raw.shape[0] != N:
                 raise ValueError(f"init doc count mismatch: got {Pbar_raw.shape[0]} vs teacher {N}")
 
-            Pbar_param = nn.Parameter(Pbar_raw*pmask_student.unsqueeze(-1))  # 유효한 문서 토큰만 반영하기 위해 masking
+            Pbar_param = nn.Parameter(Pbar_raw*pmask_student.unsqueeze(-1))
             opt = set_optimizer(args.opt, Pbar_param, args.lr, args.weight_decay)
 
             out_dir = Path(args.out_root) / args.name / f"mf{mf}" / dataset
@@ -298,8 +296,8 @@ def main():
                 Pbar_param=Pbar_param,
                 pmask_student=pmask_student,
                 chunk_p=64,
-                k = args.k,
-                temp = args.temp
+                k=args.k,
+                temp=args.temp
             )
 
             step0 = 0
