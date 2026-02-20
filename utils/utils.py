@@ -8,6 +8,13 @@ from pathlib import Path
 import logging, os
 from torch.utils.tensorboard import SummaryWriter
 
+def tokens_to_object(P_pad_np: np.ndarray, pmask_np: np.ndarray) -> np.ndarray:
+    N = P_pad_np.shape[0]
+    out = np.empty(N, dtype=object)
+    for i in range(N):
+        idx = np.where(pmask_np[i])[0]
+        out[i] = P_pad_np[i, idx, :].astype(np.float32)
+    return out
 
 
 def set_seed(seed: int):
@@ -15,6 +22,8 @@ def set_seed(seed: int):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+def log_json(logger, obj: Dict[str, Any]):
+    logger.info(json.dumps(obj, ensure_ascii=False))
 
 def get_logger(save_dir: str, name: str = "run", verbosity: int = 1, use_tb: bool = True):
     """
