@@ -3,7 +3,7 @@ import json
 import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
-
+import time
 import numpy as np
 import torch
 import torch.nn as nn 
@@ -87,7 +87,7 @@ def train_epoch(
             sc_t = score_multi_vector_masked(Qb, P_teacher_norm, qmb, pmask_teacher, 64)
 
         # student score
-        sc_s = score_multi_vector_masked(Qb, Psb, qmb, pmask_student)
+        sc_s = score_multi_vector_masked(Qb, Psb, qmb, pmask_student, 64)
         loss = infonce_distillation_loss(sc_s, sc_t, temperature=args.temp)
 
         opt.zero_grad(set_to_none=True)
@@ -128,9 +128,9 @@ def eval_retrieval_from_tensors(
     qsidx_2_query,                   # list/np.ndarray or None
 ) -> Dict[str, Any]:
     evaluator = CustomRetrievalEvaluator()
-
+    score_start = time.time()
     scores = score_multi_vector_masked(Q_norm, P_norm, qmask, pmask, chunk_p=64)  # (Nq, Np)
-
+    latency_ms = (time.time() - score_start) * 1000 / Q_norm.shape[0]
     results = {}
     for qi in range(scores.shape[0]):
         qkey = str(qsidx_2_query[qi]) if qsidx_2_query is not None else str(qi)
@@ -138,6 +138,7 @@ def eval_retrieval_from_tensors(
                          for di in range(scores.shape[1])}
 
     metrics = evaluator.compute_mteb_metrics(relevant_docs, results)
+    metrics['latency'] = latency_ms
     return metrics
 
 @torch.no_grad()
@@ -154,9 +155,10 @@ def eval(
     # student masked+norm
     
     Psb = l2_normalize(Pbar_param * pmask_student.unsqueeze(-1))
-    
     sc_t = score_multi_vector_masked(Q_norm, P_teacher_norm, qmask, pmask_teacher, chunk_p)
+    torch.cuda.empty_cache()
     sc_s = score_multi_vector_masked(Q_norm, Psb, qmask, pmask_student, chunk_p)
+    torch.cuda.empty_cache()
 
     loss = infonce_distillation_loss(sc_s, sc_t, temp)
     return float(loss.item())
@@ -425,11 +427,11 @@ def main():
 
                 if updated_r1:
                     logger.info(
-                        f"best recall epoch| {best_r1['epoch']} | nDCG@5={best_r1['NDCG@5']:.5f} | Recall@1={best_r1['Recall@1']:.5f}"
+                        f"best recall epoch| {best_r1['epoch']} | nDCG@5={best_r1['NDCG@5']:.5f} | Recall@1={best_r1['Recall@1']:.5f} | Latency {metrics['latency']:.5f}"
                     )
                 if updated_nd5:
                     logger.info(
-                        f"best nDCG@5 epoch| {best_nd5['epoch']} | nDCG@5={best_nd5['NDCG@5']:.5f} | Recall@1={best_nd5['Recall@1']:.5f}"
+                        f"best nDCG@5 epoch| {best_nd5['epoch']} | nDCG@5={best_nd5['NDCG@5']:.5f} | Recall@1={best_nd5['Recall@1']:.5f} | Latency {metrics['latency']:.5f}"
                     )
 
                 # ---------------- save (only when best updates) ----------------
@@ -449,6 +451,7 @@ def main():
                         meta={
                             "dataset": dataset,
                             "mf": mf,
+                            "latency":float(metrics['latency']),
                             "epoch": int(epoch),
                             "best_type": "Recall@1",
                             "best": best_r1,
@@ -473,6 +476,7 @@ def main():
                         meta={
                             "dataset": dataset,
                             "mf": mf,
+                            "latency":float(metrics['latency']),
                             "epoch": int(epoch),
                             "best_type": "NDCG@5",
                             "best": best_nd5,
@@ -486,6 +490,7 @@ def main():
                         },
                     )
             logger.info(json.dumps({
+                    "summary/latency": metrics['latency'],
                     "summary/best_recall": best_r1,
                     "summary/best_ndcg5": best_nd5,
                     "note": "training finished",
