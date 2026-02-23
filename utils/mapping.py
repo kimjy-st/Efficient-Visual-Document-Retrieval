@@ -48,5 +48,45 @@ DATASETMAP = {
         'mf50' : 'mf50/tatdqa_test.npz',
         'split_before' : 'tatdqa_test_dump_all.npz',
         'pseudoQ':'tatdqa_test_query.npz'
-    }
+    },
+    'shift': {
+        'mf5' : 'mf5/shiftproject_test.npz',
+        'mf10' : 'mf10/shiftproject_test.npz',
+        'mf25' : 'mf25/shiftproject_test.npz',
+        'mf50' : 'mf50/shiftproject_test.npz',
+        'split_before' : 'shiftproject_test_dump_all.npz',
+        'pseudoQ':'shiftproject_test_query.npz'
+    },
+    'ai': {
+        'mf5' : 'mf5/syntheticDocQA_artificial_intelligence_test.npz',
+        'mf10' : 'mf10/syntheticDocQA_artificial_intelligence_test.npz',
+        'mf25' : 'mf25/syntheticDocQA_artificial_intelligence_test.npz',
+        'mf50' : 'mf50/syntheticDocQA_artificial_intelligence_test.npz',
+        'split_before' : 'syntheticDocQA_artificial_intelligence_test_dump_all.npz',
+        'pseudoQ':'syntheticDocQA_artificial_intelligence_test_query.npz'
+    },
+    'energy': {
+        'mf5' : 'mf5/syntheticDocQA_energy_test.npz',
+        'mf10' : 'mf10/syntheticDocQA_energy_test.npz',
+        'mf25' : 'mf25/syntheticDocQA_energy_test.npz',
+        'mf50' : 'mf50/syntheticDocQA_energy_test.npz',
+        'split_before' : 'syntheticDocQA_energy_test_dump_all.npz',
+        'pseudoQ':'syntheticDocQA_energy_test_query.npz'
+    },
+    'gov': {
+        'mf5' : 'mf5/syntheticDocQA_government_reports_test.npz',
+        'mf10' : 'mf10/syntheticDocQA_government_reports_test.npz',
+        'mf25' : 'mf25/syntheticDocQA_government_reports_test.npz',
+        'mf50' : 'mf50/syntheticDocQA_government_reports_test.npz',
+        'split_before' : 'syntheticDocQA_government_reports_test_dump_all.npz',
+        'pseudoQ':'syntheticDocQA_government_reports_test_query.npz'
+    },
+    'health': {
+        'mf5' : 'mf5/syntheticDocQA_healthcare_industry_test.npz',
+        'mf10' : 'mf10/syntheticDocQA_healthcare_industry_test.npz',
+        'mf25' : 'mf25/syntheticDocQA_healthcare_industry_test.npz',
+        'mf50' : 'mf50/syntheticDocQA_healthcare_industry_test.npz',
+        'split_before' : 'syntheticDocQA_healthcare_industry_test_dump_all.npz',
+        'pseudoQ':'syntheticDocQA_healthcare_industry_test_query.npz'
+    },
 }
