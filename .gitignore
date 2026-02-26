@@ -6,3 +6,4 @@ data/
 *.ckpt
 *.pth
 *.pt
+*.npz
