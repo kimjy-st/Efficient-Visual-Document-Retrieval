@@ -42,7 +42,7 @@ def build_argparser():
     p.add_argument("--opt", type=str, default="adamw")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--weight_decay", type=float, default=1e-2)
-    p.add_argument("--temp", type=float, default=1.0)
+    p.add_argument("--temp", type=float, default=0.1)
     p.add_argument("--print_every", type=int, default=20)
 
     p.add_argument("--device", type=str, default="auto")
