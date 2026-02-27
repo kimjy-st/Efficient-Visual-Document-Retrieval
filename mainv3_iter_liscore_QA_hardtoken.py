@@ -374,9 +374,15 @@ def train_one_step(
         k_top = min(int(GAP_TOPK_RETURN), G.numel())
         gap_top_val, gap_top_idx = torch.topk(G, k=k_top)
 
-        # ---- aux doc selection (top aux_docs with positive gap) ----
-        M = min(int(aux_docs), G.numel())
-        aux_val, aux_doc_idx = torch.topk(G, k=M)
+        kk = min(int(k), sc_t.shape[1])
+        topk_idx = torch.topk(sc_t, k=kk, dim=-1, largest=True).indices
+        gap_topk = gap.gather(1, topk_idx).abs()
+        a = min(int(aux_docs), kk)
+        if a > 0:
+            aux_pos = torch.topk(gap_topk, k=a, dim=1, largest=True).indices
+            aux_doc_idx_q = topk_idx.gather(1, aux_pos)
+        else:
+            aux_doc_idx_q = torch.empty((Qb.shape[0], 0), device=device, dtype=torch.long)
 
     # main losses
     loss_list = listwise_distillation_loss(sc_s, sc_t, k=k, temperature=temp)
@@ -389,37 +395,34 @@ def train_one_step(
     aux_used = 0
 
     # hard docs 있을 때만 virtual queries 만들고 aux 계산
-    if aux_doc_idx.numel() > 0:
+    if aux_doc_idx_q.numel() > 0:
         q_virtual_list = []
         with torch.no_grad():
-            for doc_i in aux_doc_idx.tolist():
-                # 이 문서에서 gap이 가장 큰 쿼리 선택
-                q_i = int(torch.argmax(gap[:, doc_i].abs()).item())
-
+            B = Qb.shape[0]
+            for q_i in range(B):
                 q_tokens = Qb[q_i]
                 q_mask = qmb[q_i].bool()
                 q_tokens = q_tokens[q_mask]
-                if q_tokens.numel() == 0:
-                    continue
 
-                doc_tok = P_teacher_norm[doc_i]
-                doc_mask = pmask_teacher[doc_i].bool()
-                if doc_mask.sum().item() == 0:
-                    continue
+                for doc_i in aux_doc_idx_q[q_i].tolist():
+                    doc_i = int(doc_i)
 
-                sim = q_tokens @ doc_tok.T
-                sim[:, ~doc_mask] = float("-inf")
+                    doc_tok = P_teacher_norm[doc_i]
+                    doc_mask = pmask_teacher[doc_i].bool()
 
-                max_over_q = sim.max(dim=0).values
-                best_tok_idx = torch.argmax(max_over_q)
-                hard_tok = doc_tok[best_tok_idx]       # (D,)
+                    sim = q_tokens @ doc_tok.T
+                    sim[:, ~doc_mask] = float("-inf")
 
-                # virtual query = hard token (+noise)
-                qv = hard_tok
-                if virt_noise_std and virt_noise_std > 0:
-                    qv = qv + torch.randn_like(qv) * virt_noise_std
-                qv = l2_normalize(qv).view(1, 1, -1)
-                q_virtual_list.append(qv)
+                    max_over_q = sim.max(dim=0).values
+                    best_tok_idx = torch.argmax(max_over_q)
+                    hard_tok = doc_tok[best_tok_idx]       # (D,)
+
+                    # virtual query = hard token (+noise)
+                    qv = hard_tok
+                    if virt_noise_std and virt_noise_std > 0:
+                        qv = qv + torch.randn_like(qv) * virt_noise_std
+                    qv = l2_normalize(qv).view(1, 1, -1)
+                    q_virtual_list.append(qv)
 
         if len(q_virtual_list) > 0:
             q_virtual = torch.cat(q_virtual_list, dim=0)
@@ -430,8 +433,7 @@ def train_one_step(
                 sc_t_v = score_multi_vector_masked(q_virtual, P_teacher_norm, qmask_v, pmask_teacher, chunk_p)
             sc_s_v = score_multi_vector_masked(q_virtual, Psb, qmask_v, pmask_student, chunk_p)
 
-            kk = min(k, sc_t_v.shape[1])
-            loss_list_aux = listwise_distillation_loss(sc_s_v, sc_t_v, k=kk, temperature=temp)
+            loss_list_aux = listwise_distillation_loss(sc_s_v, sc_t_v, k=k, temperature=temp)
             loss_score_aux = score_preserving_loss(sc_s_v, sc_t_v)
 
     loss_aux = lambda_list * loss_list_aux + lambda_score * loss_score_aux
